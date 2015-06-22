@@ -2,3 +2,4 @@ VHD
 *.vhd
 *.swp
 *.dSYM/
+*.txt

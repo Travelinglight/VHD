@@ -14,25 +14,23 @@ typedef struct fileStruct{
     char ext[4];
     char attr;
     mTime ftime;
-    word start;
+    hWord start;
     word size;
 } file;
 
 FILE *fp;
-long offSet;
+word offSet;
 byte buff_block[32768];
 byte buff_byte;
 hWord FAT[32768];
 hWord nByte = 512, nCluster;    // number of bytes within a block, number of clusters on total
 hWord nFAT, nBFAT; // number of FATs, number of blocks within a FAT
-hWord nFile;    // number of files in root directory
+hWord nFile, nBlock;    // number of files in root directory, number of blocks in a cluster
 file* fIndex[512];
 const char* const month[13] = {"", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nev", "Dec"};
 
 void readBlock(word addr) {    // addr: the address of blocks
-    hWord offset;
-    offset = addr * nByte;
-    fseek(fp, offSet, SEEK_SET);
+    fseek(fp, addr, SEEK_SET);
     fread(buff_block, 1, nByte, fp);
 }
 
@@ -160,10 +158,20 @@ void printFileSize(hWord n) {
     printf("%12lu\n", fIndex[n]->size);
 }
 
+void cpCluster(FILE *out, hWord cp1) {  // function copy, cp1: cluster pointer 1
+    hWord i;
+    for (i = 0; i < nBlock; i++) {
+        readBlock(offSet + ((cp1 - 2) * nBlock + i) * nByte);
+        fwrite(buff_block, 1, nByte, out);
+    }
+}
+
 void init() {
     fp = fopen("papapapa.vhd", "rb+");
     offSet = 0x1000b;   // jump to boot block
     nByte = readHWord(offSet);
+    offSet = 0x1000d;
+    nBlock = readByte(offSet);
     offSet = 0x10010;
     nFAT = (hWord)readByte(offSet);
     offSet = 0x10011;
@@ -172,24 +180,21 @@ void init() {
     nCluster = readHWord(offSet);
     offSet = 0x10016;
     nBFAT = readHWord(offSet);
-/*    printf("nByte: %u\n", nByte);
-    printf("nFAT: %u\n", nFAT);
-    printf("nCluster: %u\n", nCluster);
-    printf("nBFAT: %u\n", nBFAT);*/
     offSet = 0x10400;
     readFAT();
     offSet += nFAT * nBFAT * nByte;
     readRD();   // read root directory
+    offSet += nFile * 32;
 }
 
 void ls() {
-    word i, j;
+    hWord i, j;
     printf("        id     |  file name   |  Attr   |      timestamp       | size    \n");
     printf("--------------------------------------------------------------------------\n");
     for (i = 0; i < nFile; i++) {
         if (fIndex[i]) {
             if (((fIndex[i]->attr & 8) == 0) & ((fIndex[i]->attr & 4) == 0) & ((fIndex[i]->attr & 2) == 0)) {
-                printf("%12lu    ", i);
+                printf("%12u    ", i);
                 printFileName(i);
                 printFileAttr(i);
                 printFileTime(i);
@@ -199,8 +204,26 @@ void ls() {
     }
 }
 
+void cp(int n) {
+    char fullName[15];
+    if (!fIndex[n])
+        return;
+    hWord cp1 = 0;
+    strcpy(fullName, fIndex[n]->name);
+    strcat(fullName, ".");
+    strcat(fullName, fIndex[n]->ext);
+    FILE *out;
+    out = fopen(fullName, "wb");
+    cp1 = fIndex[n]->start;
+    while (cp1 != 0xFFFF) {
+        cpCluster(out, cp1);
+        cp1 = FAT[cp1];
+    }
+    fclose(out);
+}
+
 int main() {
-    int i;
     init();
     ls();
+    cp(3);
 }
