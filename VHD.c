@@ -204,11 +204,11 @@ void ls() {
     }
 }
 
-void cp(int n) {
+void cp(hWord n) {
     char fullName[15];
+    hWord cp1 = 0;
     if (!fIndex[n])
         return;
-    hWord cp1 = 0;
     strcpy(fullName, fIndex[n]->name);
     strcat(fullName, ".");
     strcat(fullName, fIndex[n]->ext);
@@ -222,8 +222,35 @@ void cp(int n) {
     fclose(out);
 }
 
+void rm(int n) {
+    hWord i, j;
+    hWord cp1 = 0, cp2 = 0;
+    if (fIndex[n] == NULL) {
+        printf("file not exists!\n");
+        return;
+    }
+    cp1 = fIndex[n]->start;
+    while (cp1 != 0xFFFF) {
+        cp2 = FAT[cp1];
+        FAT[cp1] = 0x0000;
+        for (i = 0; i < nFAT; i++) {
+            fseek(fp, 0x10400 + i * (nBFAT * nByte) + cp1 * 2, SEEK_SET);
+            fputc(0, fp);
+            fputc(0, fp);
+        }
+        cp1 = cp2;
+    }
+    fseek(fp, offSet - nFile * 32 + n * 32, SEEK_SET);
+    fputc(0xE5, fp);
+    free(fIndex[n]);
+    fIndex[n] = NULL;
+    printf("Done\n");
+}
+
 int main() {
     init();
     ls();
     cp(3);
+    rm(3);
+    ls();
 }
