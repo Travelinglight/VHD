@@ -2,6 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+boot addr:     10000
+fat addr:      10400
+root dic addr: 32000
+data cluster:  36000
+*/
+
 typedef unsigned char byte;
 typedef unsigned short hWord;   // half word
 typedef unsigned long word;
@@ -22,7 +29,7 @@ FILE *fp;
 word offSet;
 byte buff_block[32768];
 byte buff_byte;
-hWord FAT[32768];
+hWord FAT[32768];// [0][1][2][3] deserved  start from [4][5]
 hWord nByte = 512, nCluster;    // number of bytes within a block, number of clusters on total
 hWord nFAT, nBFAT; // number of FATs, number of blocks within a FAT
 hWord nFile, nBlock;    // number of files in root directory, number of blocks in a cluster
@@ -56,7 +63,7 @@ void readFAT() {
 }
 
 int readFileName(hWord n) {
-    hWord i;
+    int i;
     byte head = readByte(offSet + n * 32);
     if ((head == 0xE5) || (head == 0x00))
         return 0;
@@ -72,7 +79,7 @@ int readFileName(hWord n) {
 }
 
 void readFileExt(hWord n) {
-    hWord i;
+    int i;
     for (i = 0; i < 3; i++)
         fIndex[n]->ext[i] = readByte(offSet + n * 32 + 8 + i);
     for (i = 3; i >= 0; i--) {
@@ -167,7 +174,7 @@ void cpCluster(FILE *out, hWord cp1) {  // function copy, cp1: cluster pointer 1
 }
 
 void init() {
-    fp = fopen("papapapa.vhd", "rb+");
+    fp = fopen("iykon.vhd", "rb+");
     offSet = 0x1000b;   // jump to boot block
     nByte = readHWord(offSet);
     offSet = 0x1000d;
@@ -247,10 +254,93 @@ void rm(int n) {
     printf("Done\n");
 }
 
+void add(){
+    FILE *p;
+    hWord linkedCluster[32676];
+    int i,j,k,targetFileSize,fileNumber;
+    char filename[15],name[9],ext[4],cc;
+    printf("Please: input the file you want to add into the visual disc.\nFilename: ");
+    scanf("%s",filename);
+    for(i = 0; filename[i]!='.';++i);
+        //name[i]
+    if(i<=8){
+        for(j = 0; j < i; ++j)
+            if(filename[j]>=97)
+                name[j] = filename[j]-32;
+        for(j = i; j < 8;++j)
+            name[j] = ' ';
+        name[8] = 0;
+        ext[0] = filename[i+1]>=97?filename[i+1]-32:filename[i+1];
+        ext[1] = filename[i+2]>=97?filename[i+2]-32:filename[i+2];
+        ext[2] = filename[i+3]>=97?filename[i+3]-32:filename[i+3];
+        printf("%s %s\n",name,ext);
+        
+        p = fopen(filename,"rb");//open target file
+        fseek(p,0,SEEK_END);
+        targetFileSize=ftell(p);//the size of the target file
+        fseek(p,0,SEEK_SET);
+        
+        linkedCluster[0] = (targetFileSize-1) / nByte + 1;// a cluster occupies 512 bytes
+        for(i = 2, j = 1; i < nBFAT*nByte && j <=linkedCluster[0]; ++i)
+            if(FAT[i] == 0)
+                linkedCluster[j++] = i;
+
+        //modify root dic
+        fileNumber = -1;
+        while(fIndex[++fileNumber]);
+        printf("%d files.",fileNumber);
+        offSet = 0x32000 + fileNumber * 0x20;
+        fseek(fp,offSet,SEEK_SET);
+        for(i = 0; i < 8; ++i)
+            fputc((hWord)name[i],fp);
+        for(i = 0; i < 3; ++i)
+            fputc((hWord)ext[i],fp);
+        fputc(0x20,fp); // file attr
+        fseek(fp,10,SEEK_CUR);// escape 10 reserved bytes
+        for(i = 0; i < 4; ++i)//file time and date
+            fputc((hWord)(10),fp);
+        fputc((hWord)(linkedCluster[1]%256),fp);// first cluster
+        fputc((hWord)(linkedCluster[1]/256),fp);
+        fputc((hWord)(targetFileSize%256),fp);//file size
+        fputc((hWord)(targetFileSize/256%256),fp);
+        fputc((hWord)(targetFileSize/256/256%256),fp);
+        fputc((hWord)(targetFileSize/256/256/256%256),fp);
+        for(i = 1; i < linkedCluster[0]; ++i){
+            offSet = 0x10400 + linkedCluster[i]*2;
+            fseek(fp,offSet,SEEK_SET);
+            fputc((hWord)(linkedCluster[i+1]%256),fp);
+            fputc((hWord)(linkedCluster[i+1]/256),fp);
+        }
+        fputc(0xff,fp);
+        fputc(0xff,fp);
+        
+        //data block
+        i=0;
+        j=511;
+        while(!feof(p)){
+            if(++j == nByte*1){ // one cluster occupies 1 block
+                ++i;
+                j = 0;
+                offSet = 0x36000 + (linkedCluster[i]-2)*(nByte*1);
+                fseek(fp,offSet,SEEK_SET);
+            }
+            cc = fgetc(p);
+            fputc((hWord)(cc),fp);
+        }
+        for(i = 0; i < linkedCluster[0]; ++i)
+            printf("%d ",linkedCluster[i]);
+    }else{
+        printf("Invalaid filename.");
+    }
+}
+
 int main() {
     init();
     ls();
     cp(3);
     rm(3);
     ls();
+    add();
+    getchar();
+    getchar();
 }
